@@ -3,13 +3,14 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from app.services.email_service import send_password_reset_email
 from app.auth.dependencies import get_current_user
 from app.auth.password_reset import (
     create_password_reset_token,
     reset_password,
 )
-from app.auth.security import hash_password
+from app.auth.security import hash_password, hash_transaction_pin
 from app.database.database import get_db
 from app.models.monnify_account import MonnifyAccount
 from app.models.user import User
@@ -22,6 +23,10 @@ from app.schemas.password_reset import (
     ResetPasswordRequest,
     ResetPasswordResponse,
 )
+from app.schemas.transaction_pin import (
+    SetTransactionPinRequest,
+    TransactionPinResponse,
+)
 
 
 router = APIRouter(
@@ -33,6 +38,7 @@ router = APIRouter(
 # ============================================================
 # REGISTER
 # ============================================================
+
 
 @router.post(
     "/register",
@@ -247,6 +253,7 @@ def register(
 # GET CURRENT USER
 # ============================================================
 
+
 @router.get("/me")
 def get_me(
     current_user: User = Depends(get_current_user),
@@ -260,12 +267,43 @@ def get_me(
         "is_verified": current_user.is_verified,
         "is_active": current_user.is_active,
         "created_at": current_user.created_at,
+        "has_transaction_pin": (
+            current_user.transaction_pin_hash is not None
+        ),
     }
+
+
+# ============================================================
+# SET TRANSACTION PIN
+# ============================================================
+
+
+@router.post(
+    "/transaction-pin",
+    response_model=TransactionPinResponse,
+)
+def set_transaction_pin(
+    payload: SetTransactionPinRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    current_user.transaction_pin_hash = hash_transaction_pin(
+        payload.pin
+    )
+
+    db.add(current_user)
+    db.commit()
+
+    return TransactionPinResponse(
+        message="Transaction PIN set successfully.",
+        pin_set=True,
+    )
 
 
 # ============================================================
 # FORGOT PASSWORD
 # ============================================================
+
 
 @router.post(
     "/forgot-password",
@@ -315,9 +353,12 @@ def forgot_password(
             "a password reset link has been sent."
         )
     )
+
+
 # ============================================================
 # RESET PASSWORD
 # ============================================================
+
 
 @router.post(
     "/reset-password",

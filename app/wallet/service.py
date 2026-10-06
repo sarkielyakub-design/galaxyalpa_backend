@@ -131,6 +131,75 @@ class WalletService:
         return transaction
 
     @staticmethod
+    def reserve_for_withdrawal(
+        db: Session,
+        *,
+        wallet_id: uuid.UUID,
+        amount: Decimal,
+        reference: str,
+        provider: str = "monnify",
+        provider_reference: str | None = None,
+        description: str | None = None,
+    ) -> Transaction:
+
+        if amount <= Decimal("0.00"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Amount must be greater than zero.",
+            )
+
+        wallet = db.scalar(
+            select(Wallet)
+            .where(Wallet.id == wallet_id)
+            .with_for_update()
+        )
+
+        if not wallet:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Wallet not found.",
+            )
+
+        if wallet.status.lower() != "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Wallet is not active.",
+            )
+
+        balance_before = wallet.balance
+
+        if balance_before < amount:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Insufficient wallet balance.",
+            )
+
+        balance_after = balance_before - amount
+
+        wallet.balance = balance_after
+
+        transaction = Transaction(
+            id=uuid.uuid4(),
+            wallet_id=wallet.id,
+            reference=reference,
+            transaction_type="withdrawal",
+            direction="debit",
+            amount=amount,
+            balance_before=balance_before,
+            balance_after=balance_after,
+            currency=wallet.currency,
+            status="pending",
+            provider=provider,
+            provider_reference=provider_reference,
+            description=description
+            or "Withdrawal initiated.",
+        )
+
+        db.add(transaction)
+
+        return transaction
+
+    @staticmethod
     def get_transactions(
         db: Session,
         *,

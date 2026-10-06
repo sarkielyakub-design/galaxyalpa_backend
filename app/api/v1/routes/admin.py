@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -42,6 +42,7 @@ from app.schemas.admin_wallets import (
     AdminWalletStatusUpdate,
 )
 from app.services.admin_dashboard import get_dashboard_overview
+from app.services.admin_audit import create_admin_audit_log
 
 
 router = APIRouter(
@@ -54,12 +55,14 @@ router = APIRouter(
 # ADMIN LOGIN
 # ============================================================
 
+
 @router.post(
     "/login",
     response_model=AdminLoginResponse,
 )
 def admin_login(
     payload: AdminLoginRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     admin = db.scalar(
@@ -91,6 +94,19 @@ def admin_login(
 
     admin.last_login_at = datetime.now(timezone.utc)
 
+    create_admin_audit_log(
+        db=db,
+        admin=admin,
+        action="ADMIN_LOGIN",
+        resource_type="admin",
+        resource_id=str(admin.id),
+        description="Admin successfully logged in",
+        request=request,
+        extra_data={
+            "email": admin.email,
+        },
+    )
+
     db.commit()
     db.refresh(admin)
 
@@ -108,6 +124,7 @@ def admin_login(
 # CURRENT ADMIN
 # ============================================================
 
+
 @router.get(
     "/me",
     response_model=AdminResponse,
@@ -121,6 +138,7 @@ def admin_me(
 # ============================================================
 # DASHBOARD OVERVIEW
 # ============================================================
+
 
 @router.get(
     "/dashboard/overview",
@@ -136,6 +154,7 @@ def admin_dashboard_overview(
 # ============================================================
 # LIST / SEARCH USERS
 # ============================================================
+
 
 @router.get(
     "/users",
@@ -207,6 +226,7 @@ def admin_list_users(
 # GET USER DETAILS
 # ============================================================
 
+
 @router.get(
     "/users/{user_id}",
     response_model=AdminUserDetailResponse,
@@ -272,6 +292,7 @@ def admin_get_user(
 # ACTIVATE / DEACTIVATE USER
 # ============================================================
 
+
 @router.patch(
     "/users/{user_id}/status",
     response_model=AdminUserListItem,
@@ -279,6 +300,7 @@ def admin_get_user(
 def admin_update_user_status(
     user_id: str,
     payload: AdminUserStatusUpdate,
+    request: Request,
     admin: Admin = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
@@ -292,7 +314,29 @@ def admin_update_user_status(
             detail="User not found",
         )
 
-    user.is_active = payload.is_active
+    old_status = user.is_active
+    new_status = payload.is_active
+
+    user.is_active = new_status
+
+    create_admin_audit_log(
+        db=db,
+        admin=admin,
+        action="UPDATE_USER_STATUS",
+        resource_type="user",
+        resource_id=str(user.id),
+        description=(
+            f"Admin changed user status from "
+            f"{'active' if old_status else 'inactive'} to "
+            f"{'active' if new_status else 'inactive'}"
+        ),
+        request=request,
+        extra_data={
+            "old_is_active": old_status,
+            "new_is_active": new_status,
+            "user_email": user.email,
+        },
+    )
 
     db.commit()
     db.refresh(user)
@@ -303,6 +347,7 @@ def admin_update_user_status(
 # ============================================================
 # LIST / SEARCH WALLETS
 # ============================================================
+
 
 @router.get(
     "/wallets",
@@ -393,6 +438,7 @@ def admin_list_wallets(
 # GET WALLET DETAILS
 # ============================================================
 
+
 @router.get(
     "/wallets/{wallet_id}",
     response_model=AdminWalletDetailResponse,
@@ -444,9 +490,11 @@ def admin_get_wallet(
         ],
     )
 
+
 # ============================================================
 # ACTIVATE / DEACTIVATE WALLET
 # ============================================================
+
 
 @router.patch(
     "/wallets/{wallet_id}/status",
@@ -455,6 +503,7 @@ def admin_get_wallet(
 def admin_update_wallet_status(
     wallet_id: str,
     payload: AdminWalletStatusUpdate,
+    request: Request,
     admin: Admin = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
@@ -481,10 +530,10 @@ def admin_update_wallet_status(
             detail="Wallet status must be either 'active' or 'inactive'",
         )
 
-    wallet.status = payload.status
+    old_status = wallet.status
+    new_status = payload.status
 
-    db.commit()
-    db.refresh(wallet)
+    wallet.status = new_status
 
     user = db.scalar(
         select(User).where(
@@ -497,6 +546,29 @@ def admin_update_wallet_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Wallet owner not found",
         )
+
+    create_admin_audit_log(
+        db=db,
+        admin=admin,
+        action="UPDATE_WALLET_STATUS",
+        resource_type="wallet",
+        resource_id=str(wallet.id),
+        description=(
+            f"Admin changed wallet status from "
+            f"{old_status} to {new_status}"
+        ),
+        request=request,
+        extra_data={
+            "old_status": old_status,
+            "new_status": new_status,
+            "wallet_id": str(wallet.id),
+            "user_id": str(user.id),
+            "user_email": user.email,
+        },
+    )
+
+    db.commit()
+    db.refresh(wallet)
 
     return AdminWalletListItem(
         id=wallet.id,
@@ -511,9 +583,11 @@ def admin_update_wallet_status(
         updated_at=wallet.updated_at,
     )
 
+
 # ============================================================
 # LIST / SEARCH / FILTER TRANSACTIONS
 # ============================================================
+
 
 @router.get(
     "/transactions",
@@ -669,27 +743,21 @@ def admin_list_transactions(
         AdminTransactionListItem(
             id=transaction.id,
             wallet_id=wallet.id,
-
             user_id=user.id,
             user_email=user.email,
             user_first_name=user.first_name,
             user_last_name=user.last_name,
-
             reference=transaction.reference,
             transaction_type=transaction.transaction_type,
             direction=transaction.direction,
-
             amount=transaction.amount,
             balance_before=transaction.balance_before,
             balance_after=transaction.balance_after,
-
             currency=transaction.currency,
             status=transaction.status,
-
             provider=transaction.provider,
             provider_reference=transaction.provider_reference,
             description=transaction.description,
-
             created_at=transaction.created_at,
         )
         for transaction, wallet, user in paginated_rows
@@ -707,6 +775,7 @@ def admin_list_transactions(
 # ============================================================
 # GET TRANSACTION DETAILS
 # ============================================================
+
 
 @router.get(
     "/transactions/{transaction_id}",
@@ -742,12 +811,10 @@ def admin_get_transaction(
 
     return AdminTransactionDetailResponse(
         id=transaction.id,
-
         wallet_id=wallet.id,
         wallet_currency=wallet.currency,
         wallet_balance=wallet.balance,
         wallet_status=wallet.status,
-
         user_id=user.id,
         user_email=user.email,
         user_phone=user.phone,
@@ -755,21 +822,16 @@ def admin_get_transaction(
         user_last_name=user.last_name,
         user_is_active=user.is_active,
         user_is_verified=user.is_verified,
-
         reference=transaction.reference,
         transaction_type=transaction.transaction_type,
         direction=transaction.direction,
-
         amount=transaction.amount,
         balance_before=transaction.balance_before,
         balance_after=transaction.balance_after,
-
         currency=transaction.currency,
         status=transaction.status,
-
         provider=transaction.provider,
         provider_reference=transaction.provider_reference,
         description=transaction.description,
-
         created_at=transaction.created_at,
     )

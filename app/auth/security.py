@@ -23,13 +23,27 @@ def verify_password(
     )
 
 
+def hash_transaction_pin(pin: str) -> str:
+    return password_hash.hash(pin)
+
+
+def verify_transaction_pin(
+    pin: str,
+    hashed_pin: str,
+) -> bool:
+    return password_hash.verify(
+        pin,
+        hashed_pin,
+    )
+
+
 def create_access_token(subject: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
     )
 
     payload = {
-        "sub": subject,
+        "sub": str(subject),
         "exp": expire,
     }
 
@@ -48,7 +62,28 @@ def decode_access_token(token: str) -> str | None:
             algorithms=["HS256"],
         )
 
-        return payload.get("sub")
+        subject = payload.get("sub")
 
-    except jwt.InvalidTokenError:
+        print("=== JWT DEBUG ===")
+        print("JWT decoded successfully")
+        print("JWT subject:", subject)
+        print("JWT payload:", payload)
+        print("=================")
+
+        if not subject:
+            print("JWT DEBUG: No 'sub' found in token")
+            return None
+
+        return str(subject)
+
+    except jwt.ExpiredSignatureError:
+        print("JWT DEBUG: Token has expired")
+        return None
+
+    except jwt.InvalidSignatureError:
+        print("JWT DEBUG: Invalid signature - SECRET_KEY mismatch")
+        return None
+
+    except jwt.InvalidTokenError as exc:
+        print("JWT DEBUG: Invalid token:", exc)
         return None

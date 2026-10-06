@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
 from app.database.database import get_db
+from app.models.monnify_account import MonnifyAccount
 from app.models.user import User
 from app.models.wallet import Wallet
-from app.schemas.wallet import WalletResponse, TransactionResponse
+from app.schemas.wallet import TransactionResponse, WalletResponse
 from app.wallet.service import WalletService
 
 
@@ -34,7 +35,9 @@ def get_wallet(
     db: Session = Depends(get_db),
 ):
     wallet = db.scalar(
-        select(Wallet).where(Wallet.user_id == current_user.id)
+        select(Wallet).where(
+            Wallet.user_id == current_user.id
+        )
     )
 
     if not wallet:
@@ -43,7 +46,37 @@ def get_wallet(
             detail="Wallet not found.",
         )
 
-    return wallet
+    monnify_account = db.scalar(
+        select(MonnifyAccount).where(
+            MonnifyAccount.user_id == current_user.id,
+            MonnifyAccount.wallet_id == wallet.id,
+        )
+    )
+
+    return WalletResponse(
+        id=wallet.id,
+        user_id=wallet.user_id,
+        currency=wallet.currency,
+        balance=wallet.balance,
+        status=wallet.status,
+        created_at=wallet.created_at,
+        updated_at=wallet.updated_at,
+        account_number=(
+            monnify_account.account_number
+            if monnify_account
+            else None
+        ),
+        bank_name=(
+            monnify_account.bank_name
+            if monnify_account
+            else None
+        ),
+        account_name=(
+            monnify_account.account_name
+            if monnify_account
+            else None
+        ),
+    )
 
 
 @router.get(
@@ -55,7 +88,9 @@ def get_wallet_transactions(
     db: Session = Depends(get_db),
 ):
     wallet = db.scalar(
-        select(Wallet).where(Wallet.user_id == current_user.id)
+        select(Wallet).where(
+            Wallet.user_id == current_user.id
+        )
     )
 
     if not wallet:
@@ -81,7 +116,9 @@ def credit_wallet(
     db: Session = Depends(get_db),
 ):
     wallet = db.scalar(
-        select(Wallet).where(Wallet.user_id == current_user.id)
+        select(Wallet).where(
+            Wallet.user_id == current_user.id
+        )
     )
 
     if not wallet:
@@ -127,7 +164,9 @@ def debit_wallet(
     db: Session = Depends(get_db),
 ):
     wallet = db.scalar(
-        select(Wallet).where(Wallet.user_id == current_user.id)
+        select(Wallet).where(
+            Wallet.user_id == current_user.id
+        )
     )
 
     if not wallet:

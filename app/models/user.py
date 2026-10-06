@@ -34,6 +34,11 @@ class User(Base):
         nullable=False,
     )
 
+    transaction_pin_hash: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
     first_name: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,

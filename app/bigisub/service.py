@@ -51,3 +51,16 @@ class BigisubService:
 
     def get_betting_billers(self) -> dict:
         return self.client.get_betting_billers()
+    def purchase_electricity(
+    self,
+    disco: str,
+    meter_number: str,
+    meter_type: str,
+    amount: str,  
+    ) -> dict:
+     return self.client.purchase_electricity(
+        disco=disco,
+        meter_number=meter_number,
+        meter_type=meter_type,
+        amount=amount,
+    )
